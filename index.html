@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Меню дня</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+
+  /* ============== ТОКЕНЫ ============== */
+  :root{
+    --ink:#1f2a22;            /* грифельно-зелёный, основной фон */
+    --ink-soft:#2a372d;
+    --paper:#f7f1e4;          /* тёплая кремовая бумага — карточки/текст на тёмном */
+    --paper-dim:#e8e0cd;
+    --yolk:#e8b339;           /* желток/специи — акцент */
+    --yolk-deep:#c98f1f;
+    --coral:#ef6a4c;          /* сигнальный — кнопка заказа/CTA */
+    --coral-deep:#d8512f;
+    --line: rgba(247,241,228,0.14);
+    --shadow: 0 10px 30px rgba(0,0,0,0.35);
+    --radius: 18px;
+    --serif: 'Fraunces', Georgia, 'Times New Roman', serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  @font-face{
+    font-family:'Fraunces';
+    src: local('Georgia');
+  }
+
+  *{ box-sizing:border-box; -webkit-tap-highlight-color: transparent; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background: var(--ink);
+    color: var(--paper);
+    font-family: var(--sans);
+    min-height: 100vh;
+    padding-bottom: 100px;
+  }
+  ::selection{ background: var(--yolk); color: var(--ink); }
+
+  /* На широких экранах (десктоп) ограничиваем ширину контента,
+     чтобы карточки блюд не растягивались на весь экран */
+  .app-shell{
+    max-width: 480px;
+    margin: 0 auto;
+    position: relative;
+  }
+  @media (min-width: 600px){
+    body{ background: var(--ink-soft); }
+    .app-shell{
+      background: var(--ink);
+      min-height: 100vh;
+      box-shadow: 0 0 60px rgba(0,0,0,0.4);
+    }
+    .cart-bar{ max-width: 448px; width: calc(100% - 32px); left: 50%; right: auto; transform: translate(-50%, 120%); }
+    .cart-bar.show{ transform: translate(-50%, 0); }
+    .sheet{ max-width: 480px; width: 100%; left: 50%; right: auto; transform: translate(-50%, 100%); }
+    .sheet.show{ transform: translate(-50%, 0); }
+    .sheet-overlay{ max-width: none; }
+    .tabbar{ left: calc(50% + 240px - 54px); right: auto; }
+    .day-tag{ position: sticky; }
+  }
+
+  /* ============== ШАПКА ДНЯ — сигнатурный элемент: "бирка чека" ============== */
+  .day-tag{
+    position: sticky; top:0; z-index: 30;
+    background: var(--ink);
+    padding: 18px 20px 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .day-tag__eyebrow{
+    font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--yolk); font-weight: 600; margin-bottom: 4px;
+  }
+  .day-tag__title{
+    font-family: var(--serif); font-size: 28px; font-weight: 700;
+    letter-spacing: -0.01em; color: var(--paper);
+    display:flex; align-items:baseline; gap:10px;
+  }
+  .day-tag__title small{
+    font-family: var(--sans); font-size: 13px; font-weight: 500;
+    color: var(--paper-dim); opacity:.65;
+  }
+
+  /* ============== СПИСОК БЛЮД ============== */
+  .menu-list{ padding: 16px 16px 20px; display:flex; flex-direction:column; gap:14px; }
+
+  .dish{
+    background: var(--ink-soft);
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--line);
+    position: relative;
+    display:flex; flex-direction:column;
+  }
+  .dish.is-out{ opacity:.55; }
+  .dish__img-wrap{
+    width:100%; aspect-ratio: 16/9; max-height: 160px; background: #14201a;
+    position:relative; overflow:hidden;
+  }
+  .dish__img-wrap img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .dish__img-wrap.no-img{ display:flex; align-items:center; justify-content:center; color:var(--paper-dim); font-size:13px; opacity:.5; }
+  .dish__badge{
+    position:absolute; top:10px; left:10px;
+    background: rgba(31,42,34,0.85); backdrop-filter: blur(4px);
+    color: var(--paper); font-size:11px; padding:5px 10px;
+    border-radius: 100px; font-weight:600; letter-spacing:.02em;
+    border: 1px solid var(--line);
+  }
+  .dish__badge.low{ color: var(--yolk); }
+  .dish__badge.out{ color: var(--coral); }
+
+  .dish__body{ padding: 14px 16px 16px; display:flex; flex-direction:column; gap:10px; }
+  .dish__name{ font-family: var(--serif); font-size: 19px; font-weight:600; line-height:1.25; }
+  .dish__row{ display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .dish__price{ font-size:16px; font-weight:700; color: var(--yolk); }
+
+  .stepper{
+    display:flex; align-items:center; gap:0;
+    background: var(--ink); border:1px solid var(--line); border-radius: 100px;
+    overflow:hidden;
+  }
+  .stepper button{
+    width:36px; height:36px; border:none; background:transparent; color:var(--paper);
+    font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center;
+  }
+  .stepper button:active{ background: var(--line); }
+  .stepper button:disabled{ opacity:.3; }
+  .stepper__qty{ min-width: 28px; text-align:center; font-weight:700; font-size:15px; }
+
+  .add-btn{
+    height:36px; padding: 0 18px; border-radius:100px; border:none;
+    background: var(--yolk); color: var(--ink); font-weight:700; font-size:14px;
+    cursor:pointer;
+  }
+  .add-btn:disabled{ background: var(--ink); color: var(--paper-dim); border:1px solid var(--line); cursor:not-allowed; }
+
+  .empty-state{
+    text-align:center; padding: 60px 24px; color: var(--paper-dim);
+  }
+  .empty-state__title{ font-family: var(--serif); font-size:22px; margin-bottom:8px; color:var(--paper); }
+  .empty-state__sub{ font-size:14px; opacity:.7; line-height:1.5; }
+
+  /* ============== ПЛАВАЮЩАЯ КОРЗИНА ============== */
+  .cart-bar{
+    position:fixed; left:16px; right:16px; bottom:16px; z-index:40;
+    background: var(--coral); color:#fff; border-radius: 100px;
+    padding: 14px 20px; display:flex; align-items:center; justify-content:space-between;
+    box-shadow: var(--shadow); cursor:pointer; border:none;
+    transform: translateY(120%); transition: transform .25s ease;
+  }
+  .cart-bar.show{ transform: translateY(0); }
+  .cart-bar__left{ display:flex; align-items:center; gap:10px; font-weight:700; font-size:15px; }
+  .cart-bar__count{
+    background: rgba(255,255,255,0.25); width:26px; height:26px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; font-size:13px;
+  }
+  .cart-bar__right{ font-weight:800; font-size:16px; }
+
+  /* ============== МОДАЛКИ (Корзина / История) ============== */
+  .sheet-overlay{
+    position:fixed; inset:0; background: rgba(0,0,0,0.55); z-index:50;
+    opacity:0; pointer-events:none; transition: opacity .2s ease;
+  }
+  .sheet-overlay.show{ opacity:1; pointer-events:auto; }
+  .sheet{
+    position:fixed; left:0; right:0; bottom:0; z-index:51;
+    background: var(--ink); border-radius: 22px 22px 0 0;
+    max-height: 88vh; overflow-y:auto;
+    transform: translateY(100%); transition: transform .28s cubic-bezier(.32,.72,0,1);
+    padding-bottom: 24px;
+  }
+  .sheet.show{ transform: translateY(0); }
+  .sheet__handle{ width:36px; height:4px; background:var(--line); border-radius:4px; margin:10px auto 4px; }
+  .sheet__header{
+    padding: 6px 20px 14px; display:flex; align-items:center; justify-content:space-between;
+    border-bottom:1px solid var(--line);
+  }
+  .sheet__title{ font-family: var(--serif); font-size:22px; font-weight:700; }
+  .sheet__close{ background:none; border:none; color:var(--paper-dim); font-size:22px; cursor:pointer; padding:4px 8px; }
+  .sheet__body{ padding: 16px 20px 0; }
+
+  .cart-item{ display:flex; gap:12px; padding:12px 0; border-bottom:1px solid var(--line); }
+  .cart-item__img{ width:56px; height:56px; border-radius:12px; object-fit:cover; background:#14201a; flex-shrink:0; }
+  .cart-item__info{ flex:1; display:flex; flex-direction:column; gap:6px; }
+  .cart-item__name{ font-size:14.5px; font-weight:600; }
+  .cart-item__price{ font-size:13px; color: var(--paper-dim); opacity:.8; }
+  .cart-item__controls{ display:flex; align-items:center; gap:10px; }
+
+  .field{ margin-bottom: 14px; }
+  .field label{ display:block; font-size:12.5px; color:var(--paper-dim); margin-bottom:6px; font-weight:600; letter-spacing:.01em; }
+  .field input, .field textarea{
+    width:100%; background: var(--ink-soft); border:1px solid var(--line); border-radius:12px;
+    padding: 12px 14px; color: var(--paper); font-size:15px; font-family: var(--sans);
+  }
+  .field input::placeholder, .field textarea::placeholder{ color: var(--paper-dim); opacity:.45; }
+  .field input:focus, .field textarea:focus{ outline:none; border-color: var(--yolk); }
+
+  .geo-btn{
+    width:100%; padding:12px; border-radius:12px; border:1px dashed var(--line);
+    background:transparent; color: var(--yolk); font-weight:600; font-size:14px; cursor:pointer;
+    margin-bottom: 14px; display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .geo-btn:active{ background: var(--line); }
+  .geo-status{ font-size:12.5px; color:var(--paper-dim); margin-top:-8px; margin-bottom:14px; opacity:.8; }
+
+  .pay-options{ display:flex; gap:8px; margin-bottom:14px; }
+  .pay-opt{
+    flex:1; padding:12px 8px; border-radius:12px; border:1px solid var(--line);
+    background: var(--ink-soft); color: var(--paper-dim); text-align:center;
+    font-size:13px; font-weight:600; cursor:pointer;
+  }
+  .pay-opt.active{ border-color: var(--yolk); color: var(--yolk); background: rgba(232,179,57,0.08); }
+
+  .summary-row{ display:flex; justify-content:space-between; padding:7px 0; font-size:14px; color:var(--paper-dim); }
+  .summary-row.total{ color:var(--paper); font-weight:800; font-size:17px; padding-top:12px; border-top:1px solid var(--line); margin-top:6px; }
+
+  .submit-btn{
+    width:100%; padding:16px; border-radius:14px; border:none; margin-top:18px;
+    background: var(--coral); color:#fff; font-weight:800; font-size:16px; cursor:pointer;
+  }
+  .submit-btn:disabled{ background: var(--ink-soft); color: var(--paper-dim); }
+
+  .tabbar{
+    position:fixed; top:0; right:16px; padding-top:18px; z-index:31; display:flex; gap:10px;
+  }
+  .icon-btn{
+    width:38px; height:38px; border-radius:50%; background: var(--ink-soft); border:1px solid var(--line);
+    color: var(--paper); display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:17px;
+  }
+
+  .history-item{
+    border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:12px; background: var(--ink-soft);
+  }
+  .history-item__top{ display:flex; justify-content:space-between; font-size:12.5px; color:var(--paper-dim); margin-bottom:8px; }
+  .history-item__list{ font-size:13.5px; line-height:1.6; margin-bottom:10px; }
+  .history-item__list span{ color: var(--paper-dim); }
+  .repeat-btn{
+    width:100%; padding:10px; border-radius:10px; border:1px solid var(--yolk); background:transparent;
+    color: var(--yolk); font-weight:700; font-size:13.5px; cursor:pointer;
+  }
+  .history-warn{ font-size:12px; color: var(--coral); margin-top:8px; line-height:1.5; }
+
+  .toast{
+    position:fixed; top:18px; left:50%; transform: translateX(-50%) translateY(-20px);
+    background: var(--paper); color: var(--ink); padding:12px 18px; border-radius:100px;
+    font-size:13.5px; font-weight:600; z-index:60; opacity:0; transition: all .25s ease;
+    box-shadow: var(--shadow); max-width: 86%; text-align:center;
+  }
+  .toast.show{ opacity:1; transform: translateX(-50%) translateY(0); }
+
+  .skeleton{ background: linear-gradient(90deg, var(--ink-soft) 25%, var(--line) 50%, var(--ink-soft) 75%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: var(--radius); height: 200px; margin: 0 16px 14px; }
+  @keyframes shimmer{ 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ transition: none !important; animation: none !important; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="app-shell">
+
+  <div class="tabbar">
+    <button class="icon-btn" id="historyBtn" aria-label="История заказов">🕘</button>
+  </div>
+
+  <header class="day-tag">
+    <div class="day-tag__eyebrow">Меню на сегодня</div>
+    <div class="day-tag__title" id="dayTitle">Загрузка… <small id="dayDate"></small></div>
+  </header>
+
+  <main id="menuList" class="menu-list">
+    <div class="skeleton"></div>
+    <div class="skeleton"></div>
+  </main>
+
+  <!-- Плавающая корзина -->
+  <button class="cart-bar" id="cartBar">
+    <div class="cart-bar__left">
+      <span class="cart-bar__count" id="cartCount">0</span>
+      <span>Корзина</span>
+    </div>
+    <div class="cart-bar__right" id="cartSum">0 ₫</div>
+  </button>
+
+  <!-- Overlay -->
+  <div class="sheet-overlay" id="overlay"></div>
+
+  <!-- ВЕДОМОСТЬ: Корзина / оформление заказа -->
+  <section class="sheet" id="cartSheet">
+    <div class="sheet__handle"></div>
+    <div class="sheet__header">
+      <div class="sheet__title">Ваш заказ</div>
+      <button class="sheet__close" id="closeCart">✕</button>
+    </div>
+    <div class="sheet__body">
+      <div id="cartItemsList"></div>
+
+      <div class="field" style="margin-top:18px;">
+        <label>Ник в Telegram</label>
+        <input type="text" id="inputUsername" placeholder="@username">
+      </div>
+      <div class="field">
+        <label>Номер телефона</label>
+        <input type="tel" id="inputPhone" placeholder="+84 ...">
+      </div>
+
+      <button class="geo-btn" id="geoBtn">📍 Определить адрес по геолокации</button>
+      <div class="geo-status" id="geoStatus"></div>
+
+      <div class="field">
+        <label>Адрес доставки</label>
+        <textarea id="inputAddress" rows="2" placeholder="Улица, дом, ориентир"></textarea>
+      </div>
+
+      <div class="field">
+        <label>Способ оплаты</label>
+        <div class="pay-options">
+          <div class="pay-opt active" data-pay="Наличные">Наличные</div>
+          <div class="pay-opt" data-pay="QR">QR-код</div>
+          <div class="pay-opt" data-pay="Перевод">Перевод</div>
+        </div>
+      </div>
+
+      <div class="summary-row"><span>Сумма блюд</span><span id="sumItems">0 ₫</span></div>
+      <div class="summary-row"><span>Доставка</span><span id="sumDelivery">—</span></div>
+      <div class="summary-row total"><span>Итого</span><span id="sumTotal">0 ₫</span></div>
+
+      <button class="submit-btn" id="submitOrderBtn">Оформить заказ</button>
+    </div>
+  </section>
+
+  <!-- ВЕДОМОСТЬ: История заказов -->
+  <section class="sheet" id="historySheet">
+    <div class="sheet__handle"></div>
+    <div class="sheet__header">
+      <div class="sheet__title">История заказов</div>
+      <button class="sheet__close" id="closeHistory">✕</button>
+    </div>
+    <div class="sheet__body" id="historyList"></div>
+  </section>
+
+  </div><!-- /app-shell -->
+
+  <div class="toast" id="toast"></div>
+
+<script>
+/* ===================================================================
+   НАСТРОЙКА: вставьте сюда URL вашего Google Apps Script Web App
+   (как получить — см. README.md, шаг "Деплой")
+=================================================================== */
+const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbwHKGVPskvuuauHbt5uydsIH4LqMAHh4p_LhL0mN7XIuv-fXaRK0ufWSIgpXdXJvXoI/exec';
+
+const tg = window.Telegram?.WebApp;
+try{ tg?.expand(); tg?.ready(); }catch(e){}
+
+/* ------------------------- Состояние ------------------------- */
+let menuItems = [];      // текущее меню дня
+let cart = {};           // { itemId: qty }
+let deliverySettings = null;
+let currentDeliveryFee = null;
+let selectedPayment = 'Наличные';
+let userCoords = null;
+
+const DAYS_RU_FULL = {0:'Воскресенье',1:'Понедельник',2:'Вторник',3:'Среда',4:'Четверг',5:'Пятница',6:'Суббота'};
+
+/* ------------------------- Утилиты ------------------------- */
+function fmtPrice(n){ return Math.round(n).toLocaleString('ru-RU') + ' ₫'; }
+
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2600);
+}
+
+async function api(action, payload={}){
+  try{
+    const res = await fetch(BACKEND_URL, {
+      method:'POST',
+      body: JSON.stringify({ action, ...payload })
+    });
+    return await res.json();
+  }catch(err){
+    console.error(err);
+    return { ok:false, error:'Сеть недоступна' };
+  }
+}
+
+/* ------------------------- Загрузка меню ------------------------- */
+async function loadMenu(){
+  const today = new Date();
+  document.getElementById('dayDate').textContent = today.toLocaleDateString('ru-RU', { day:'numeric', month:'long' });
+
+  const resp = await api('getMenu');
+  const list = document.getElementById('menuList');
+
+  if(!resp.ok){
+    document.getElementById('dayTitle').innerHTML = 'Меню недоступно';
+    list.innerHTML = `<div class="empty-state"><div class="empty-state__title">Не удалось загрузить меню</div><div class="empty-state__sub">${resp.error||'Проверьте подключение и попробуйте снова.'}</div></div>`;
+    return;
+  }
+
+  document.getElementById('dayTitle').innerHTML = resp.day + ' <small id="dayDate">' + today.toLocaleDateString('ru-RU', { day:'numeric', month:'long' }) + '</small>';
+  menuItems = resp.items;
+
+  if(!menuItems.length){
+    list.innerHTML = `<div class="empty-state"><div class="empty-state__title">На сегодня меню пустое</div><div class="empty-state__sub">Загляните позже — блюда дня обновляются ежедневно.</div></div>`;
+    return;
+  }
+
+  renderMenu();
+}
+
+function renderMenu(){
+  const list = document.getElementById('menuList');
+  list.innerHTML = '';
+  menuItems.forEach(item => {
+    const out = item.stock <= 0;
+    const low = !out && item.stock <= 3;
+    const qty = cart[item.id]?.qty || 0;
+
+    const card = document.createElement('div');
+    card.className = 'dish' + (out ? ' is-out' : '');
+    card.innerHTML = `
+      <div class="dish__img-wrap ${item.image ? '' : 'no-img'}">
+        ${item.image ? `<img src="${item.image}" alt="${item.name}" loading="lazy" onerror="this.parentElement.classList.add('no-img'); this.remove();">` : 'Фото скоро будет'}
+        <div class="dish__badge ${out ? 'out' : (low ? 'low':'')}">${out ? 'Нет в наличии' : (low ? `Осталось ${item.stock}` : 'В наличии')}</div>
+      </div>
+      <div class="dish__body">
+        <div class="dish__name">${item.name}</div>
+        <div class="dish__row">
+          <div class="dish__price">${fmtPrice(item.price)}</div>
+          <div id="ctrl-${item.id}"></div>
+        </div>
+      </div>`;
+    list.appendChild(card);
+    renderItemControl(item.id);
+  });
+}
+
+function renderItemControl(id){
+  const item = menuItems.find(m=>m.id===id);
+  const holder = document.getElementById('ctrl-'+id);
+  if(!holder) return;
+  const qty = cart[id]?.qty || 0;
+  const out = item.stock <= 0;
+
+  if(out){
+    holder.innerHTML = `<button class="add-btn" disabled>Нет</button>`;
+    return;
+  }
+
+  if(qty === 0){
+    holder.innerHTML = `<button class="add-btn" onclick="changeQty(${id},1)">В корзину</button>`;
+  } else {
+    holder.innerHTML = `
+      <div class="stepper">
+        <button onclick="changeQty(${id},-1)">−</button>
+        <div class="stepper__qty">${qty}</div>
+        <button onclick="changeQty(${id},1)" ${qty>=item.stock?'disabled':''}>+</button>
+      </div>`;
+  }
+}
+
+function changeQty(id, delta){
+  const item = menuItems.find(m=>m.id===id);
+  if(!item) return;
+  const current = cart[id]?.qty || 0;
+  let next = current + delta;
+  if(next < 0) next = 0;
+  if(next > item.stock){ showToast(`Доступно только ${item.stock} шт.`); next = item.stock; }
+
+  if(next === 0){ delete cart[id]; }
+  else { cart[id] = { qty: next, name:item.name, price:item.price, image:item.image }; }
+
+  renderItemControl(id);
+  updateCartBar();
+}
+
+/* ------------------------- Корзина (бар + лист) ------------------------- */
+function cartTotals(){
+  let count=0, sum=0;
+  Object.values(cart).forEach(c=>{ count+=c.qty; sum+=c.qty*c.price; });
+  return {count, sum};
+}
+
+function updateCartBar(){
+  const {count, sum} = cartTotals();
+  const bar = document.getElementById('cartBar');
+  document.getElementById('cartCount').textContent = count;
+  document.getElementById('cartSum').textContent = fmtPrice(sum);
+  bar.classList.toggle('show', count>0);
+}
+
+function renderCartSheet(){
+  const wrap = document.getElementById('cartItemsList');
+  const entries = Object.entries(cart);
+  if(!entries.length){
+    wrap.innerHTML = `<div class="empty-state" style="padding:30px 0;"><div class="empty-state__sub">Корзина пуста</div></div>`;
+  } else {
+    wrap.innerHTML = entries.map(([id,c])=>`
+      <div class="cart-item">
+        <img class="cart-item__img" src="${c.image||''}" onerror="this.style.visibility='hidden'">
+        <div class="cart-item__info">
+          <div class="cart-item__name">${c.name}</div>
+          <div class="cart-item__price">${fmtPrice(c.price)} × ${c.qty}</div>
+          <div class="cart-item__controls">
+            <div class="stepper">
+              <button onclick="changeQty(${id},-1); renderCartSheet();">−</button>
+              <div class="stepper__qty">${c.qty}</div>
+              <button onclick="changeQty(${id},1); renderCartSheet();">+</button>
+            </div>
+          </div>
+        </div>
+      </div>`).join('');
+  }
+  recalcSummary();
+}
+
+function recalcSummary(){
+  const {sum} = cartTotals();
+  document.getElementById('sumItems').textContent = fmtPrice(sum);
+  document.getElementById('sumDelivery').textContent = currentDeliveryFee!=null ? fmtPrice(currentDeliveryFee) : '—';
+  const delivery = currentDeliveryFee!=null ? currentDeliveryFee : 0;
+  document.getElementById('sumTotal').textContent = fmtPrice(sum + delivery);
+}
+
+/* ------------------------- Доставка: расчёт по геолокации ------------------------- */
+function haversineKm(lat1, lng1, lat2, lng2){
+  const R = 6371;
+  const dLat = (lat2-lat1) * Math.PI/180;
+  const dLng = (lng2-lng1) * Math.PI/180;
+  const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLng/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+async function ensureDeliverySettings(){
+  if(deliverySettings) return deliverySettings;
+  const resp = await api('getDeliverySettings');
+  if(resp.ok){ deliverySettings = resp.settings; }
+  return deliverySettings;
+}
+
+async function useGeolocation(){
+  const statusEl = document.getElementById('geoStatus');
+  if(!navigator.geolocation){
+    statusEl.textContent = 'Геолокация не поддерживается на этом устройстве.';
+    return;
+  }
+  statusEl.textContent = 'Определяем местоположение…';
+  navigator.geolocation.getCurrentPosition(async (pos)=>{
+    userCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    document.getElementById('inputAddress').placeholder = 'Адрес определён по геолокации';
+    const settings = await ensureDeliverySettings();
+    if(settings){
+      const distKm = haversineKm(settings.RestaurantLat, settings.RestaurantLng, userCoords.lat, userCoords.lng);
+      currentDeliveryFee = calcZoneFee(distKm, settings);
+      const zoneLabel = distKm <= Number(settings.ZoneCenterKm) ? 'центр'
+                       : distKm <= Number(settings.ZoneMidKm) ? 'средний пояс'
+                       : 'дальняя зона';
+      statusEl.textContent = `~${distKm.toFixed(1)} км от ресторана · зона: ${zoneLabel}`;
+    } else {
+      statusEl.textContent = 'Местоположение определено.';
+    }
+    recalcSummary();
+  }, (err)=>{
+    statusEl.textContent = 'Не удалось определить местоположение. Укажите адрес вручную.';
+  }, { enableHighAccuracy:true, timeout:8000 });
+}
+
+function calcZoneFee(distanceKm, settings){
+  if(distanceKm <= Number(settings.ZoneCenterKm)) return Number(settings.ZoneCenterFee);
+  if(distanceKm <= Number(settings.ZoneMidKm)) return Number(settings.ZoneMidFee);
+  return Number(settings.ZoneFarFee);
+}
+
+async function applyFallbackDeliveryIfNeeded(){
+  if(currentDeliveryFee != null) return; // уже посчитана по геолокации
+  const settings = await ensureDeliverySettings();
+  currentDeliveryFee = settings ? Number(settings.FallbackFee) : 0;
+  recalcSummary();
+}
+
+/* ------------------------- Оформление заказа ------------------------- */
+async function submitOrder(){
+  const username = document.getElementById('inputUsername').value.trim();
+  const phone = document.getElementById('inputPhone').value.trim();
+  const address = document.getElementById('inputAddress').value.trim();
+  const {count, sum} = cartTotals();
+
+  if(!count){ showToast('Корзина пуста'); return; }
+  if(!username){ showToast('Укажите ник в Telegram'); return; }
+  if(!phone){ showToast('Укажите номер телефона'); return; }
+  if(!address){ showToast('Укажите адрес доставки'); return; }
+
+  await applyFallbackDeliveryIfNeeded();
+
+  const btn = document.getElementById('submitOrderBtn');
+  btn.disabled = true; btn.textContent = 'Отправляем…';
+
+  const items = Object.entries(cart).map(([id,c])=>({ id:Number(id), name:c.name, qty:c.qty }));
+
+  const resp = await api('createOrder', {
+    order: {
+      username, phone, address,
+      lat: userCoords?.lat || '', lng: userCoords?.lng || '',
+      items,
+      deliveryFee: currentDeliveryFee || 0,
+      paymentMethod: selectedPayment
+    }
+  });
+
+  btn.disabled = false; btn.textContent = 'Оформить заказ';
+
+  if(!resp.ok){
+    showToast(resp.error || 'Не удалось оформить заказ');
+    return;
+  }
+
+  saveOrderToHistory(resp, items, selectedPayment, address);
+
+  showToast('Заказ оформлен! Мы свяжемся с вами.');
+  cart = {};
+  currentDeliveryFee = null;
+  updateCartBar();
+  closeSheet('cartSheet');
+  await loadMenu(); // обновляем остатки
+}
+
+/* ------------------------- История заказов (Telegram CloudStorage) ------------------------- */
+function csGet(key){
+  return new Promise((resolve)=>{
+    if(tg?.CloudStorage){
+      tg.CloudStorage.getItem(key, (err, value)=> resolve(err ? null : value));
+    } else {
+      resolve(localStorage.getItem(key)); // фолбэк для тестирования вне Telegram
+    }
+  });
+}
+function csSet(key, value){
+  return new Promise((resolve)=>{
+    if(tg?.CloudStorage){
+      tg.CloudStorage.setItem(key, value, ()=>resolve());
+    } else {
+      localStorage.setItem(key, value); resolve();
+    }
+  });
+}
+
+async function saveOrderToHistory(resp, items, payment, address){
+  const raw = await csGet('order_history');
+  let history = [];
+  try{ history = raw ? JSON.parse(raw) : []; }catch(e){ history = []; }
+
+  history.unshift({
+    orderId: resp.orderId,
+    date: new Date().toISOString(),
+    items, // [{id, name, qty}]
+    itemsTotal: resp.itemsTotal,
+    deliveryFee: resp.deliveryFee,
+    grandTotal: resp.grandTotal,
+    payment, address
+  });
+  history = history.slice(0, 20); // храним последние 20 заказов
+  await csSet('order_history', JSON.stringify(history));
+}
+
+async function openHistory(){
+  const list = document.getElementById('historyList');
+  list.innerHTML = '<div class="empty-state__sub" style="padding:20px 0;">Загрузка…</div>';
+  openSheet('historySheet');
+
+  const raw = await csGet('order_history');
+  let history = [];
+  try{ history = raw ? JSON.parse(raw) : []; }catch(e){}
+
+  if(!history.length){
+    list.innerHTML = `<div class="empty-state" style="padding:30px 0;"><div class="empty-state__title">Пока пусто</div><div class="empty-state__sub">Здесь появится история ваших заказов.</div></div>`;
+    return;
+  }
+
+  list.innerHTML = history.map((order, idx)=>{
+    const dateStr = new Date(order.date).toLocaleDateString('ru-RU', {day:'numeric', month:'long', hour:'2-digit', minute:'2-digit'});
+    const itemsHtml = order.items.map(it=>`${it.name} <span>× ${it.qty}</span>`).join('<br>');
+    return `
+      <div class="history-item">
+        <div class="history-item__top"><span>${dateStr}</span><span>${fmtPrice(order.grandTotal)}</span></div>
+        <div class="history-item__list">${itemsHtml}</div>
+        <button class="repeat-btn" onclick="repeatOrder(${idx})">Повторить заказ</button>
+        <div class="history-warn" id="warn-${idx}"></div>
+      </div>`;
+  }).join('');
+}
+
+async function repeatOrder(idx){
+  const raw = await csGet('order_history');
+  let history = [];
+  try{ history = raw ? JSON.parse(raw) : []; }catch(e){}
+  const order = history[idx];
+  if(!order) return;
+
+  const warnEl = document.getElementById('warn-'+idx);
+  warnEl.textContent = 'Проверяем наличие…';
+
+  // КРИТИЧЕСКАЯ ПРОВЕРКА: спрашиваем backend, доступны ли блюда именно сегодня
+  // и в нужном количестве, прежде чем добавлять их в корзину.
+  const resp = await api('checkAvailability', { items: order.items.map(it=>({id:it.id, name:it.name, qty:it.qty})) });
+
+  if(!resp.ok){
+    warnEl.textContent = 'Не удалось проверить наличие. Попробуйте позже.';
+    return;
+  }
+
+  const unavailable = resp.items.filter(it=>!it.available);
+  const available = resp.items.filter(it=>it.available);
+
+  if(unavailable.length){
+    warnEl.innerHTML = 'Недоступно: ' + unavailable.map(u=>`${u.name} (${u.reason})`).join(', ') +
+      (available.length ? '<br>Остальные блюда добавлены в корзину.' : '');
+  } else {
+    warnEl.textContent = 'Все блюда добавлены в корзину!';
+  }
+
+  available.forEach(it=>{
+    const existing = cart[it.id]?.qty || 0;
+    cart[it.id] = { qty: existing + (order.items.find(o=>o.id===it.id)?.qty||1), name: it.name, price: it.price, image: it.image };
+  });
+
+  updateCartBar();
+  renderMenu(); // обновит кнопки на странице меню, если эти блюда там видны
+  if(available.length){ setTimeout(()=>{ closeSheet('historySheet'); openSheet('cartSheet'); renderCartSheet(); }, 700); }
+}
+
+/* ------------------------- Управление шторками ------------------------- */
+function openSheet(id){
+  document.getElementById('overlay').classList.add('show');
+  document.getElementById(id).classList.add('show');
+}
+function closeSheet(id){
+  document.getElementById(id).classList.remove('show');
+  if(!document.querySelectorAll('.sheet.show').length){
+    document.getElementById('overlay').classList.remove('show');
+  }
+}
+
+document.getElementById('cartBar').addEventListener('click', ()=>{ renderCartSheet(); openSheet('cartSheet'); });
+document.getElementById('closeCart').addEventListener('click', ()=>closeSheet('cartSheet'));
+document.getElementById('historyBtn').addEventListener('click', openHistory);
+document.getElementById('closeHistory').addEventListener('click', ()=>closeSheet('historySheet'));
+document.getElementById('overlay').addEventListener('click', ()=>{ closeSheet('cartSheet'); closeSheet('historySheet'); });
+document.getElementById('geoBtn').addEventListener('click', useGeolocation);
+document.getElementById('submitOrderBtn').addEventListener('click', submitOrder);
+
+document.querySelectorAll('.pay-opt').forEach(el=>{
+  el.addEventListener('click', ()=>{
+    document.querySelectorAll('.pay-opt').forEach(e=>e.classList.remove('active'));
+    el.classList.add('active');
+    selectedPayment = el.dataset.pay;
+  });
+});
+
+/* ------------------------- Старт ------------------------- */
+loadMenu();
+ensureDeliverySettings();
+</script>
+</body>
+</html>

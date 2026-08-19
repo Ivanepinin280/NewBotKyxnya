@@ -1,0 +1,281 @@
+/**
+ * ===================================================================
+ *  FOOD DELIVERY MINI APP — BACKEND (Google Apps Script)
+ * ===================================================================
+ *  Этот файл вставляется в Google Apps Script, привязанный к вашей
+ *  Google Таблице. Подробная инструкция по установке — в README.md.
+ *
+ *  Структура таблицы (3 листа):
+ *
+ *  1) "Menu" — меню на каждый день недели
+ *     A: Day          (Понедельник / Вторник / ... / Воскресенье)
+ *     B: Name          (название блюда)
+ *     C: Image         (прямая ссылка на картинку)
+ *     D: Price         (цена, число)
+ *     E: Stock         (остаток, число; 0 = нет в наличии)
+ *
+ *  2) "Orders" — все заказы (создаются автоматически)
+ *     A: Timestamp
+ *     B: OrderId
+ *     C: TelegramUsername
+ *     D: Phone
+ *     E: Address
+ *     F: Lat
+ *     G: Lng
+ *     H: ItemsJson      (JSON-строка с составом заказа)
+ *     I: ItemsTotal      (сумма блюд)
+ *     J: DeliveryFee
+ *     K: GrandTotal
+ *     L: PaymentMethod  (Наличные / QR / Перевод)
+ *     M: Status         (Новый / ...)
+ *
+ *  3) "Settings" — настройки доставки (создаётся скриптом сама)
+ *     Зональная система доставки (под Нячанг):
+ *       A1: RestaurantLat     B1: широта ресторана
+ *       A2: RestaurantLng     B2: долгота ресторана
+ *       A3: ZoneCenterKm      B3: радиус "центра" в км (напр. 3)
+ *       A4: ZoneCenterFee     B4: стоимость доставки в центре (напр. 30000)
+ *       A5: ZoneMidKm         B5: радиус "среднего пояса" в км (напр. 6)
+ *       A6: ZoneMidFee        B6: стоимость в среднем поясе (напр. 40000)
+ *       A7: ZoneFarFee        B7: стоимость за пределами обоих радиусов (напр. 50000)
+ *       A8: FallbackFee       B8: фикс. доставка, если геолокация не дана
+ * ===================================================================
+ */
+
+const SHEET_MENU = 'Menu';
+const SHEET_ORDERS = 'Orders';
+const SHEET_SETTINGS = 'Settings';
+
+const DAYS_RU = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота'];
+
+/** Точка входа для GET-запросов (используется для простой проверки/health-check) */
+function doGet(e) {
+  return jsonResponse({ ok: true, message: 'Food delivery backend is running' });
+}
+
+/** Точка входа для всех POST-запросов от мини-аппа */
+function doPost(e) {
+  let body;
+  try {
+    body = JSON.parse(e.postData.contents);
+  } catch (err) {
+    return jsonResponse({ ok: false, error: 'Bad JSON' });
+  }
+
+  const action = body.action;
+
+  try {
+    switch (action) {
+      case 'getMenu':
+        return jsonResponse(getMenu());
+      case 'checkAvailability':
+        return jsonResponse(checkAvailability(body.items || []));
+      case 'createOrder':
+        return jsonResponse(createOrder(body.order));
+      case 'getDeliverySettings':
+        return jsonResponse(getDeliverySettings());
+      default:
+        return jsonResponse({ ok: false, error: 'Unknown action: ' + action });
+    }
+  } catch (err) {
+    return jsonResponse({ ok: false, error: String(err) });
+  }
+}
+
+function jsonResponse(obj) {
+  return ContentService
+    .createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+/* ------------------------------------------------------------------ */
+/*  МЕНЮ                                                              */
+/* ------------------------------------------------------------------ */
+
+/** Возвращает меню, актуальное для текущего дня недели */
+function getMenu() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(SHEET_MENU);
+  if (!sheet) return { ok: false, error: 'Лист Menu не найден' };
+
+  const today = DAYS_RU[new Date().getDay()];
+  const rows = sheet.getDataRange().getValues();
+  // rows[0] — заголовки, пропускаем
+  const items = [];
+  for (let i = 1; i < rows.length; i++) {
+    const [day, name, image, price, stock] = rows[i];
+    if (!name) continue;
+    if (String(day).trim().toLowerCase() === today.toLowerCase()) {
+      items.push({
+        id: i, // номер строки используем как id блюда
+        name: String(name),
+        image: String(image || ''),
+        price: Number(price) || 0,
+        stock: Number(stock) || 0
+      });
+    }
+  }
+  return { ok: true, day: today, items };
+}
+
+/**
+ * Проверяет, доступны ли блюда (по id и желаемому количеству) в нужном объёме.
+ * Используется при повторном заказе из истории — чтобы не дать заказать
+ * то, чего уже нет в наличии (или сегодня не подаётся).
+ */
+function checkAvailability(items) {
+  const menuResp = getMenu();
+  if (!menuResp.ok) return menuResp;
+
+  const menuById = {};
+  menuResp.items.forEach(it => { menuById[it.id] = it; });
+
+  const result = items.map(reqItem => {
+    const current = menuById[reqItem.id];
+    if (!current) {
+      return { id: reqItem.id, name: reqItem.name, available: false, reason: 'Не подаётся сегодня' };
+    }
+    if (current.stock < reqItem.qty) {
+      return {
+        id: reqItem.id,
+        name: current.name,
+        available: false,
+        reason: current.stock === 0 ? 'Нет в наличии' : `Доступно только ${current.stock} шт.`,
+        maxQty: current.stock,
+        price: current.price,
+        image: current.image
+      };
+    }
+    return { id: reqItem.id, name: current.name, available: true, price: current.price, image: current.image, stock: current.stock };
+  });
+
+  return { ok: true, items: result };
+}
+
+/* ------------------------------------------------------------------ */
+/*  НАСТРОЙКИ ДОСТАВКИ                                                */
+/* ------------------------------------------------------------------ */
+
+function getDeliverySettings() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(SHEET_SETTINGS);
+  if (!sheet) {
+    sheet = ss.insertSheet(SHEET_SETTINGS);
+    // Зональная система доставки по умолчанию (Нячанг, точка — пляжный центр)
+    sheet.getRange('A1:B8').setValues([
+      ['RestaurantLat', 12.235222],
+      ['RestaurantLng', 109.197278],
+      ['ZoneCenterKm', 3],      // в пределах 3 км — "центр"
+      ['ZoneCenterFee', 30000],
+      ['ZoneMidKm', 6],         // от 3 до 6 км — "средний пояс"
+      ['ZoneMidFee', 40000],
+      ['ZoneFarFee', 50000],    // свыше 6 км — "дальняя зона"
+      ['FallbackFee', 40000]    // если геолокацию не дали — берём средний тариф
+    ]);
+  }
+  const values = sheet.getRange('A1:B8').getValues();
+  const settings = {};
+  values.forEach(([key, val]) => { settings[key] = val; });
+  return { ok: true, settings };
+}
+
+/** Считает стоимость доставки по зональной системе на основе расстояния в км */
+function calcZoneFee(distanceKm, settings) {
+  if (distanceKm <= Number(settings.ZoneCenterKm)) return Number(settings.ZoneCenterFee);
+  if (distanceKm <= Number(settings.ZoneMidKm)) return Number(settings.ZoneMidFee);
+  return Number(settings.ZoneFarFee);
+}
+
+/* ------------------------------------------------------------------ */
+/*  ЗАКАЗЫ                                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Создаёт заказ: заново проверяет наличие и цены по таблице (никогда не
+ * доверяем цифрам, присланным с клиента), списывает остатки и
+ * записывает заказ в лист Orders.
+ */
+function createOrder(order) {
+  if (!order || !order.items || !order.items.length) {
+    return { ok: false, error: 'Пустой заказ' };
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const menuSheet = ss.getSheetByName(SHEET_MENU);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000); // не даём двум заказам списать остатки одновременно
+
+  try {
+    const rows = menuSheet.getDataRange().getValues();
+    const today = DAYS_RU[new Date().getDay()];
+
+    // 1. Проверяем наличие и собираем актуальные цены
+    const verifiedItems = [];
+    for (const reqItem of order.items) {
+      const rowIndex = reqItem.id; // строка в таблице
+      const row = rows[rowIndex];
+      if (!row) return { ok: false, error: `Блюдо "${reqItem.name}" больше не найдено в меню` };
+
+      const [day, name, image, price, stock] = row;
+      if (String(day).trim().toLowerCase() !== today.toLowerCase()) {
+        return { ok: false, error: `Блюдо "${name}" сегодня не подаётся` };
+      }
+      const stockNum = Number(stock) || 0;
+      if (stockNum < reqItem.qty) {
+        return { ok: false, error: `Недостаточно "${name}" в наличии (доступно: ${stockNum})` };
+      }
+      verifiedItems.push({
+        rowIndex,
+        name: String(name),
+        price: Number(price) || 0,
+        qty: reqItem.qty
+      });
+    }
+
+    // 2. Списываем остатки
+    verifiedItems.forEach(it => {
+      const stockCell = menuSheet.getRange(it.rowIndex + 1, 5); // колонка E = Stock
+      const current = Number(stockCell.getValue()) || 0;
+      stockCell.setValue(current - it.qty);
+    });
+
+    // 3. Считаем суммы
+    const itemsTotal = verifiedItems.reduce((sum, it) => sum + it.price * it.qty, 0);
+    const deliveryFee = Number(order.deliveryFee) || 0;
+    const grandTotal = itemsTotal + deliveryFee;
+
+    // 4. Записываем заказ
+    let ordersSheet = ss.getSheetByName(SHEET_ORDERS);
+    if (!ordersSheet) {
+      ordersSheet = ss.insertSheet(SHEET_ORDERS);
+      ordersSheet.appendRow(['Timestamp', 'OrderId', 'TelegramUsername', 'Phone', 'Address', 'Lat', 'Lng', 'ItemsJson', 'ItemsTotal', 'DeliveryFee', 'GrandTotal', 'PaymentMethod', 'Status']);
+    }
+
+    const orderId = 'ORD-' + new Date().getTime();
+    ordersSheet.appendRow([
+      new Date(),
+      orderId,
+      order.username || '',
+      order.phone || '',
+      order.address || '',
+      order.lat || '',
+      order.lng || '',
+      JSON.stringify(verifiedItems.map(it => ({ name: it.name, price: it.price, qty: it.qty }))),
+      itemsTotal,
+      deliveryFee,
+      grandTotal,
+      order.paymentMethod || '',
+      'Новый'
+    ]);
+
+    return {
+      ok: true,
+      orderId,
+      itemsTotal,
+      deliveryFee,
+      grandTotal
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
