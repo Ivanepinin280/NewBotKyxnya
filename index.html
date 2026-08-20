@@ -1344,11 +1344,11 @@
         <img class="logo-img" src="logo.png" alt="СВОЯ КУХНЯ">
         <div>
           <div class="header-title">СВОЯ КУХНЯ</div>
-          <div class="header-desc">Свежая авторская домашняя еда с доставкой по Нячангу</div>
+          <div class="header-desc">Свежая домашняя еда с доставкой по Нячангу</div>
         </div>
       </div>
       <div class="promo-banner">
-        Режим работы: ПН-ПТ с 11:00-20:00
+        ★ МЕНЮ ★
       </div>
     </div>
   </div>
@@ -1436,7 +1436,7 @@
     // (Script Properties), — с клиента он никогда не передаётся и не виден.
     // Разверните Apps Script из файла Code.gs (см. инструкцию в комплекте) и
     // вставьте сюда URL вашего веб-приложения.
-    const ORDER_API_URL = 'https://script.google.com/macros/s/AKfycbyNHntHIHw6-cMyWy5c0fatrOr6KFIYrQXgXRhsxxqhbLVFBlebv7URLHzfC4KWBHsr/exec';
+    const ORDER_API_URL = 'https://script.google.com/macros/s/ВАШ_ORDER_DEPLOYMENT_ID/exec';
 
     // ⚠️ Координаты ресторана (точка отсчёта для расчёта расстояния доставки).
     // 12°14'03.6"N 109°11'45.0"E переведено в десятичный формат (только в нём понимает JS).
@@ -2424,6 +2424,58 @@
       };
       save('userData', savedUserData);
 
+      let orderSentOk = false;
+      let orderSendError = '';
+
+      try {
+        // Content-Type: text/plain — чтобы браузер не слал предварительный OPTIONS-запрос
+        // (Apps Script Web App его не обрабатывает). Сам Apps Script разбирает JSON вручную.
+        // Поля name/phone/address/items/payment/total уходят в таблицу "order",
+        // поле text — в уведомление Telegram (токен для него хранится на сервере).
+        const resp = await fetch(ORDER_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            name,
+            phone,
+            address: addressForSheet,
+            items: itemsSummary,
+            payment,
+            total: grandTotal,
+            text
+          })
+        });
+
+        if (!resp.ok) {
+          orderSendError = `Сервер ответил ошибкой HTTP ${resp.status}`;
+        } else {
+          const result = await resp.json();
+          if (result && result.result === 'ok') {
+            orderSentOk = true;
+          } else {
+            orderSendError = (result && result.message) ? result.message : 'Неизвестная ошибка сервера';
+          }
+        }
+      } catch (err) {
+        console.warn('Order submit failed', err);
+        orderSendError = 'Не удалось связаться с сервером (' + err.message + ')';
+      }
+
+      if (!orderSentOk) {
+        // Не обманываем клиента "успехом", если заказ реально не сохранился —
+        // иначе он решит, что заказ принят, и просто уйдёт ждать без дела.
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Оформить заказ'; }
+        alert('Не удалось отправить заказ администратору. Пожалуйста, попробуйте ещё раз или свяжитесь с нами напрямую.\n\nТехническая причина: ' + orderSendError);
+        return;
+      }
+
+      cart = {};
+      save('cart', cart);
+      updateCartFab();
+      closeModal('cartModal');
+      alert('Ваш заказ направлен администратору. С вами свяжутся в ближайшее время.');
+      renderMenu();
+
       const orderRecord = {
         id: orderCounter,
         ts: new Date().toISOString(),
@@ -2437,35 +2489,6 @@
       orderHistory = orderHistory || [];
       orderHistory.unshift(orderRecord);
       save('orderHistory', orderHistory);
-
-      try {
-        // Content-Type: text/plain — чтобы браузер не слал предварительный OPTIONS-запрос
-        // (Apps Script Web App его не обрабатывает). Сам Apps Script разбирает JSON вручную.
-        // Поля name/phone/address/items/payment/total уходят в таблицу "order",
-        // поле text — в уведомление Telegram (токен для него хранится на сервере).
-        await fetch(ORDER_API_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            name,
-            phone,
-            address: addressForSheet,
-            items: itemsSummary,
-            payment,
-            total: grandTotal,
-            text
-          })
-        });
-      } catch (err) {
-        console.warn('Order submit failed', err);
-      }
-
-      cart = {};
-      save('cart', cart);
-      updateCartFab();
-      closeModal('cartModal');
-      alert('Ваш заказ направлен администратору. С вами свяжутся в ближайшее время.');
-      renderMenu();
 
       } finally {
         window.isSubmittingOrder = false;
