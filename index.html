@@ -1348,7 +1348,7 @@
         </div>
       </div>
       <div class="promo-banner">
-        Режим работы:ПН-ПТ с 11:00-20:00
+        Режим работы: ПН-ПТ с 11:00-20:00
       </div>
     </div>
   </div>
@@ -1428,7 +1428,7 @@
 
   <script>
     const SHEET_API_URL = 'https://sheets.googleapis.com/v4/spreadsheets/SPREADSHEET_ID/values/Sheet1?key=API_KEY';
-    const SHEET_API_FALLBACK = 'https://script.google.com/macros/s/AKfycbwUcgS3bvlZXd6wIR4_mKCQ7tlbLfLAUqBFojVSaMyjy9UGRSE4NHUFYCTAp20s6_96/exec';
+    const SHEET_API_FALLBACK = 'https://script.google.com/macros/s/AKfycbyytR-HwA0y-TnHS_7nygs-_ZkPHDYzQQWFgV3GJSVuvdn93oX0kP92Ti9bQVqW7C_gFg/exec';
     // ⚠️ Токен Telegram-бота и chat_id здесь больше НЕ хранятся — раньше они были видны
     // любому через "Просмотр кода страницы", из-за чего боты мошенников их находили.
     // Теперь заказ уходит на серверный прокси (Google Apps Script), а сам прокси
@@ -1446,7 +1446,7 @@
     // Тарифы доставки по расстоянию от ресторана до адреса клиента.
     // Порядок важен: проверяются по возрастанию maxKm, берётся первый подходящий.
     const DELIVERY_TIERS = [
-      { maxKm: 1.0, price: 20000 },   // примерно до 1 км
+      { maxKm: 1.0, price: 30000 },   // примерно до 1 км
       { maxKm: 2.5, price: 40000 },   // примерно до 2 км
       { maxKm: Infinity, price: 50000 } // всё, что дальше
     ];
@@ -2452,6 +2452,12 @@
           const result = await resp.json();
           if (result && result.result === 'ok') {
             orderSentOk = true;
+            // Заказ записался в таблицу, но уведомление в Telegram могло не уйти —
+            // это отдельная (не критичная для клиента) проблема, показываем её вам.
+            if (result.telegram === 'error') {
+              console.warn('Telegram notify failed:', result.telegramError);
+              window.lastTelegramError = result.telegramError || 'неизвестная ошибка';
+            }
           } else {
             orderSendError = (result && result.message) ? result.message : 'Неизвестная ошибка сервера';
           }
@@ -2474,6 +2480,13 @@
       updateCartFab();
       closeModal('cartModal');
       alert('Ваш заказ направлен администратору. С вами свяжутся в ближайшее время.');
+      if (window.lastTelegramError) {
+        // Пока отлаживаете Telegram-уведомления, показываем это отдельным алертом,
+        // чтобы сразу видеть причину без открытия консоли разработчика.
+        // Когда всё заработает стабильно — эту часть можно убрать.
+        alert('⚠️ Заказ успешно записан в таблицу, но уведомление в Telegram НЕ отправлено.\n\nПричина: ' + window.lastTelegramError);
+        window.lastTelegramError = null;
+      }
       renderMenu();
 
       const orderRecord = {
