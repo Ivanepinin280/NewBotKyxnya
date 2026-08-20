@@ -1,1 +1,2 @@
-# SvoyaKyhnyaNatrang
+# SvoyaKyhnyaNTR
+Бот для заказа еды
