@@ -1344,11 +1344,11 @@
         <img class="logo-img" src="logo.png" alt="СВОЯ КУХНЯ">
         <div>
           <div class="header-title">СВОЯ КУХНЯ</div>
-          <div class="header-desc">Свежая авторская домашняя еда с доставкой по Нячангу</div>
+          <div class="header-desc">Свежая домашняя еда с доставкой по Нячангу</div>
         </div>
       </div>
       <div class="promo-banner">
-        Режим работы: ПН-ПТ с 11:00-20:00
+        ★ МЕНЮ ★
       </div>
     </div>
   </div>
@@ -1428,7 +1428,7 @@
 
   <script>
     const SHEET_API_URL = 'https://sheets.googleapis.com/v4/spreadsheets/SPREADSHEET_ID/values/Sheet1?key=API_KEY';
-    const SHEET_API_FALLBACK = 'https://script.google.com/macros/s/AKfycbyytR-HwA0y-TnHS_7nygs-_ZkPHDYzQQWFgV3GJSVuvdn93oX0kP92Ti9bQVqW7C_gFg/exec';
+    const SHEET_API_FALLBACK = 'https://script.google.com/macros/s/AKfycbwUcgS3bvlZXd6wIR4_mKCQ7tlbLfLAUqBFojVSaMyjy9UGRSE4NHUFYCTAp20s6_96/exec';
     // ⚠️ Токен Telegram-бота и chat_id здесь больше НЕ хранятся — раньше они были видны
     // любому через "Просмотр кода страницы", из-за чего боты мошенников их находили.
     // Теперь заказ уходит на серверный прокси (Google Apps Script), а сам прокси
@@ -1446,7 +1446,7 @@
     // Тарифы доставки по расстоянию от ресторана до адреса клиента.
     // Порядок важен: проверяются по возрастанию maxKm, берётся первый подходящий.
     const DELIVERY_TIERS = [
-      { maxKm: 1.0, price: 30000 },   // примерно до 1 км
+      { maxKm: 1.0, price: 20000 },   // примерно до 1 км
       { maxKm: 2.5, price: 40000 },   // примерно до 2 км
       { maxKm: Infinity, price: 50000 } // всё, что дальше
     ];
@@ -2022,11 +2022,14 @@
             </ul>
             <div class="cart-total-block">
               <div class="cart-total-line"><span>Товары:</span><span id="cartItemsTotalValue">${FMT.format(total)}</span></div>
-              <div class="cart-total-line" id="deliveryFeeLine" style="${deliveryInfo ? '' : 'display:none;'}">
-                <span>Доставка (~<span id="deliveryDistanceValue">${deliveryInfo ? deliveryInfo.distanceKm.toFixed(1) : ''}</span> км):</span>
-                <span id="deliveryFeeValue">${deliveryInfo ? FMT.format(deliveryInfo.fee) : ''}</span>
+              <div class="cart-total-line" id="deliveryFeeLine">
+                <span id="deliveryLabelValue">${deliveryInfo ? `Доставка (~${deliveryInfo.distanceKm.toFixed(1)} км):` : 'Доставка:'}</span>
+                <span id="deliveryFeeValue">${deliveryInfo ? FMT.format(deliveryInfo.fee) : 'уточняется 📍'}</span>
               </div>
               <div class="cart-total" id="cartGrandTotalLine">Итого: ${FMT.format(total + (deliveryInfo ? deliveryInfo.fee : 0))}</div>
+            </div>
+            <div id="deliveryHint" style="font-size:12px;color:var(--text-muted);margin:-16px 0 16px;text-align:center;">
+              ${deliveryInfo ? '' : 'Нажмите 📍 ниже, чтобы точно рассчитать стоимость доставки по расстоянию'}
             </div>
             <form id="orderForm" onsubmit="sendOrder(event)">
               <div class="info-box">⚠️ <strong>Укажите точные данные для обратной связи</strong></div>
@@ -2085,19 +2088,21 @@
       const items = Object.values(cart);
       const total = items.reduce((s,i)=>s + (i.price||0) * (i.qty||0), 0);
 
-      const line = document.getElementById('deliveryFeeLine');
-      const distEl = document.getElementById('deliveryDistanceValue');
+      const labelEl = document.getElementById('deliveryLabelValue');
       const feeEl = document.getElementById('deliveryFeeValue');
       const grandEl = document.getElementById('cartGrandTotalLine');
+      const hintEl = document.getElementById('deliveryHint');
 
-      if (!line || !grandEl) return;
+      if (!grandEl) return;
 
       if (deliveryInfo) {
-        line.style.display = '';
-        if (distEl) distEl.textContent = deliveryInfo.distanceKm.toFixed(1);
+        if (labelEl) labelEl.textContent = `Доставка (~${deliveryInfo.distanceKm.toFixed(1)} км):`;
         if (feeEl) feeEl.textContent = FMT.format(deliveryInfo.fee);
+        if (hintEl) hintEl.textContent = '';
       } else {
-        line.style.display = 'none';
+        if (labelEl) labelEl.textContent = 'Доставка:';
+        if (feeEl) feeEl.textContent = 'уточняется 📍';
+        if (hintEl) hintEl.textContent = 'Нажмите 📍 ниже, чтобы точно рассчитать стоимость доставки по расстоянию';
       }
 
       grandEl.textContent = `Итого: ${FMT.format(total + (deliveryInfo ? deliveryInfo.fee : 0))}`;
